@@ -1,0 +1,799 @@
+---
+title: "Manuscript code for 'Small Arctic rivers transport legacy contaminants to coastal areas in Kongsfjorden, Svalbard'"
+author: "Maeve McGovern"
+date: "September, 2020"
+output: html_document
+---
+
+This file contains the code used for the tables and figures in the manuscript 'Small Arctic rivers transport legacy contaminants to coastal areas in Kongsfjorden, Svalbard'
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo=T, message=F, warning=F)
+
+# For data prep
+library(tidyverse)
+
+# For stats and plotting
+library(vegan)
+library(broom)
+library(PlotSvalbard)
+
+# For plots and table formatting
+library(patchwork)
+library(kableExtra)
+library(RColorBrewer)
+library(pdftools)
+library(jpeg)
+library(ggrepel)
+set.seed(42)
+
+# Load datafile
+Data <- read_csv("Secondary_Data/KongsPOPs_Cleaned_Data.csv") %>% 
+   select(-Date) %>% 
+   mutate(Name = case_when(grepl("Bay", Station) ~ "BE",
+                           grepl("Kva", Station) ~"KH", 
+                           grepl("Gas", Station) ~"GA", 
+                           grepl("Inner", Station) ~"IF", 
+                           grepl("Kongs", Station) ~"KV"))
+  
+# Load secondary datafiles
+LogKow <- read_csv("Secondary_Data/LogKOW.csv") # Literature values for logKOWs used in Figure 6. 
+CTD <- read_csv('Secondary_Data/TS_diagram.csv') # CTD datafiles for the supplemental temperature-salinity diagram
+```
+
+## Figure 1. Station Map
+
+```{r Figure 1}
+# Station Map using Mikko's PlotSvalbard package
+# Vihtakari, M. (2019). PlotSvalbard: PlotSvalbard – Plot Research Data From Svalbard on Maps. Rpackage version 0.8.5.
+
+Kongsfjord <- Data %>% 
+  select(Station, Name, Longitude, Latitude) %>% 
+  distinct()
+
+Kongsfjord$Name <- factor(Kongsfjord$Name, levels = c("KV","IF", "GA", "BA","KH"))
+
+x <- transform_coord(Kongsfjord, lon = "Longitude", lat = "Latitude", bind = TRUE)
+
+basemap("kongsfjorden", limits = c(11.3, 12.69, 78.86, 79.1), 
+          bathymetry=TRUE, round.lat = 0.05, round.lon = 0.5) +
+  geom_point(data = x, aes(x = lon.utm, y = lat.utm, color=Name), cex = 10) + 
+  scale_color_brewer(palette="PuBuGn") +
+  geom_text(data = x, aes(x = lon.utm + 5, y = lat.utm + 5, 
+                          label = Name), cex= 5, fontface = 2) +
+  theme(legend.position='none')
+```
+
+
+## Figure 2. Boxplot of concentrations for main groups. 
+
+```{r Figure 2}
+
+# Concentrations of contamiant groups by type (marine vs. river) and fraction (particulate vs. dissolved). 
+
+Data$Type <- factor(Data$Type,levels = c("River", "Fjord"))
+
+S1 <- Data %>%
+  filter(!Volume_L == 1) %>%
+  arrange(Lab_ID, Volume_L) %>%
+  ggplot(aes(x = Type, y = Sum_PCB, fill = Fraction)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  xlab(NULL) + ylab("SUM PCB") + theme_classic() +
+  scale_fill_manual(values=c("#8B9DAF","lightsalmon4"))  + 
+  theme(legend.position='none') +
+  geom_point(position = position_jitterdodge(), stat ='identity', shape = 21, size = 2, alpha = 1) + 
+  scale_y_log10() + xlab(NULL) + ylab(expression(paste(Sigma, 'PCB' ~ (pg~L^-1)))) + 
+  theme(text = element_text(size = 18))
+
+S2 <- Data %>%
+  filter(!Volume_L == 1) %>%
+  arrange(Lab_ID, Volume_L) %>%
+  ggplot(aes(x = Type, y = Sum_DDTs, fill = Fraction)) + 
+  geom_boxplot(outlier.shape = NA) + xlab(NULL) +
+  scale_fill_manual(values = c("#8B9DAF","lightsalmon4")) + theme_classic() + 
+  theme(legend.position ='none') +
+  geom_point(position=position_jitterdodge(), stat='identity', shape = 21, size = 2,alpha=1) + 
+  scale_y_log10() + ylab(expression(paste(Sigma, 'DDT' ~ (pg~L^-1)))) + xlab(NULL) + 
+  theme(text = element_text(size = 18))
+
+S3 <- Data %>%
+  filter(!Volume_L == 1) %>%
+  arrange(Lab_ID, Volume_L) %>%
+  ggplot(aes(x = Type, y = Sum_HCH, fill = Fraction)) + 
+  geom_boxplot(outlier.shape = NA) + xlab(NULL) + ylab("SUM HCH") +
+  scale_fill_manual(values = c("#8B9DAF","lightsalmon4")) + theme_classic() + 
+  theme(legend.position='none') +
+  geom_point(position = position_jitterdodge(), stat ='identity', shape = 21, size = 2, alpha =1) + 
+  scale_y_log10() + ylab(expression(paste(Sigma, 'HCH' ~ (pg~L^-1)))) + 
+  xlab(NULL) + theme(text = element_text(size = 18))
+
+S4 <- Data %>%
+  filter(!Volume_L == 1) %>%
+  arrange(Lab_ID, Volume_L) %>%
+  ggplot(aes(x = Type, y = Sum_Chlordanes,fill = Fraction)) + 
+  geom_boxplot(outlier.shape = NA) + xlab(NULL) + ylab("SUM Chlordane") + 
+  scale_fill_manual(values = c("#8B9DAF","lightsalmon4")) + 
+  theme_classic() + theme(legend.position ='none') +
+  geom_point(position = position_jitterdodge(), stat='identity', shape = 21, size = 2,alpha=1) + 
+  scale_y_log10() + ylab(expression(paste(Sigma, 'Chlordanes' ~ (pg~L^-1)))) + 
+  xlab(NULL) + theme(text = element_text(size=18))
+
+S5 <- Data %>%
+  filter(!Volume_L == 1) %>%
+  arrange(Lab_ID, Volume_L) %>%
+  ggplot(aes(x = Type, y = HCB,fill=Fraction)) + 
+  geom_boxplot(outlier.shape = NA) + xlab(NULL) +
+  scale_fill_manual(values=c("#8B9DAF","lightsalmon4")) + 
+  theme_classic() + theme(legend.position='none') +
+  geom_point(position = position_jitterdodge(), stat ='identity', shape = 21, size = 2, alpha = 1) + 
+  scale_y_log10() + ylab(expression(paste('HCB' ~ (pg~L^-1)))) + 
+  xlab(NULL) + theme(text = element_text(size = 18))
+
+S6 <- Data %>%
+  filter(!Volume_L == 1) %>%
+  arrange(Lab_ID, Volume_L) %>%
+  ggplot(aes(x=Type, y=PeCB, fill = Fraction)) + 
+  geom_boxplot(outlier.shape = NA) + xlab(NULL) +
+  scale_fill_manual(values=c("#8B9DAF","lightsalmon4")) + 
+  theme_classic() + theme(legend.position ='none') +
+  geom_point(position = position_jitterdodge(), stat ='identity', shape = 21, size = 2, alpha = 1) + 
+  scale_y_log10() + ylab(expression(paste('PeCB' ~ (pg~L^-1)))) + 
+  xlab(NULL) + theme(text = element_text(size=18))
+
+S7 <- Data %>%
+  filter(!Volume_L == 1) %>%
+  arrange(Lab_ID, Volume_L) %>%
+  ggplot(aes(x = Type, y = Sum_OC, fill = Fraction)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  xlab(NULL) + scale_fill_manual(values = c("#8B9DAF","lightsalmon4")) + 
+  theme_classic() + theme(legend.position ='none') +
+  geom_point(position = position_jitterdodge(), stat ='identity', shape = 21, size = 2, alpha = 1) +
+  ylab(expression(paste(Sigma, 'OCs' ~ (pg~L^-1)))) + xlab(NULL) + 
+  theme(text = element_text(size=18)) + scale_y_log10()
+
+
+Figure2 <- ((S7|S1|S3)/(S4|S5|S2) + plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'A') & theme(legend.position = 'bottom'))
+
+
+# Save plot
+ggsave("Figure2.pdf", Figure2, width = 12, height = 8.8, device = cairo_pdf)
+```
+
+
+```{r Concentration Tests}
+
+# Normality and wilcoxon rank-sum tests of groups of contaminants between river vs. fjord for dissolved and particulate fractions. 
+
+# Normality tests. 
+Shapiro <- Data %>% 
+  select(Type, Fraction, HCB, Sum_PCB, Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_OC) %>% 
+  pivot_longer(cols = -c(Type, Fraction), names_to = "Compound", values_to= 'Concentration') %>%   
+  nest(-Compound) %>% 
+  mutate(shapiro = map(data, ~shapiro.test(.x$Concentration)), 
+         glanced = map(shapiro, glance), tidied = map(shapiro, tidy)) %>% 
+  unnest(glanced) %>% 
+  select(Compound, W = statistic, p.value) 
+
+
+# Table of non-parametric Wilcoxon rank-sum tests 
+Dis <- Data %>%
+  filter(Fraction=='Dissolved')  %>%
+  select(c(Type, HCB, Sum_PCB, Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_OC))  %>%
+  pivot_longer(cols = -c(Type), names_to = "Compound", values_to = 'Concentration') %>%   
+  nest(-Compound) %>%                  
+  mutate(results = map(data, ~tidy(wilcox.test(Concentration ~ Type, data = .)))) %>%
+  select(-c(data)) %>%
+  unnest(results)
+
+Part <- Data %>%
+  filter(Fraction=='Particulate')  %>%
+  select(c(Type,HCB, Sum_PCB, Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_OC))  %>%
+  pivot_longer(cols = -c(Type), names_to = "Compound", values_to= 'Concentration') %>%   
+  nest(-Compound) %>%                  
+  mutate(results = map(data, ~tidy(wilcox.test(Concentration ~ Type, data = .)))) %>%
+  select(-c(data)) %>%
+  unnest(results)
+
+Dis %>% 
+  select(-c(method, alternative))  %>% 
+  kable(caption= 'Dissolved: Results of Wilcoxon Rank Sum Two-sided Test btw Fjord and River Dissolved samples', digits=4) %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  row_spec(0, bold = TRUE)
+
+Part  %>% 
+  select(-c(method, alternative))  %>% 
+  kable(caption= 'Particulate: Results of Wilcoxon Rank Sum Two-sided Test btw Fjord and River Particulate samples', digits=4) %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  row_spec(0, bold = TRUE)
+
+
+PCB7 <- Data %>% 
+  ungroup() %>% 
+  filter(Volume_L != "1") %>%
+  group_by(Station, Type, Fraction, Volume_L) %>% 
+  mutate(Sum_PCB7 = sum(c_across(c(PCB_28, PCB_52, PCB_101, PCB_118, PCB_138, PCB_153, PCB_180)))) %>% 
+  select(c(Station, Type, Fraction, Sum_PCB7)) %>% 
+  ungroup() %>% 
+  group_by(Type, Fraction) %>% 
+  summarise(n=n(), 
+            Mean = mean(Sum_PCB7, na.rm=T), 
+            stdev = sd(Sum_PCB7, na.rm=T), 
+            min = min(Sum_PCB7, na.rm=T), 
+            max = max(Sum_PCB7, na.rm=T))
+
+PCB7_Table <- PCB7 %>% 
+kable(caption= 'KongsPOPs PCB7 (PCB-28, PCB-52, PCB-101, PCB-118, PCB-138, PCB-153, PCB-180)', digits=2, booktabs = T, align = c("r"))  %>% 
+kable_classic(full_width = F)
+```
+
+
+## Figure 3. Multivariate analyses
+ 
+RDA (Concentrations) and CCA (Composition) constrained by type (Rivers vs. Fjord) for the dissolved fraction
+
+```{r Figure 3}
+
+# Figure 3
+
+#Figure 3b: Concentration
+# PCA/RDA 
+
+RDA <- Data %>% 
+  filter(Fraction=='Dissolved') %>% 
+  filter(Volume_L !=1) %>% 
+  select(-c(Station, Longitude, Latitude, Fraction, Volume_L, Lab_ID)) %>% 
+  relocate(Name, Type)
+
+Concentrations_rep <- RDA %>% select(c(aHCH:PCB_187)) 
+Name <- RDA %>% select(Name)
+Sums <- RDA %>% select(c(Sum_PCB, Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_Chlorobenzenes, Sum_OC))
+Colors <- brewer.pal(5,'PuBuGn')
+
+#Dissolved Concentrations
+Tot_log = log10(Concentrations_rep+1)
+Tot_logs <- scale(Tot_log, center = TRUE, scale = FALSE)
+rda.Tot <- rda(Tot_logs ~ Type, data = RDA)
+rda.Tot
+anova(rda.Tot, by='margin')
+
+RDAscores <- scores(rda.Tot, display = "sites") %>% 
+  as.data.frame() 
+RDAvect <- scores(rda.Tot, display = "species") %>% 
+  as.data.frame()
+
+RDA$Name <- factor(RDA$Name, levels = c("KV", "IF", "GA", "BE","KH"))
+
+# Envfits
+fit <- envfit(rda.Tot, Sums, perm = 999, na.rm=T) %>% 
+  scores(., display = "vectors") %>% 
+  as.data.frame() %>% 
+  rownames_to_column("species")
+
+fit$species <- factor(fit$species, levels = c("Sum_OC","Sum_PCB", "Sum_HCH", "Sum_Chlordanes","Sum_DDTs","Sum_Chlorobenzenes"),
+       ordered = TRUE,
+       labels = c(expression(paste(Sigma,'OCs')),
+            expression(paste(paste(Sigma, "PCB" [17]))), 
+            expression(paste(Sigma,'HCHs')),
+            expression(paste(Sigma,'Chlordanes')),
+            expression(paste(Sigma,'DDTs')),
+            expression(paste(Sigma,'Chlorobenzenes'))))
+
+Plot1 <- ggplot() +
+  geom_point(data = RDAscores, aes(x = RDA1, y = PC1, fill = RDA$Name, shape = RDA$Type), 
+             color= "gray45", size= 6.5) +
+  scale_fill_manual(values=c(Colors)) + 
+  theme_classic() + 
+  scale_shape_manual(values=c(23,21)) +
+  geom_vline(xintercept = c(0), color = "grey70", linetype = 2) + 
+  ylim(-1.2, 1.2) + xlim(-1.2,1.2) +
+  geom_hline(yintercept = c(0), color = "grey70", linetype = 2)  +
+  labs(x = "RDA1 (50 %)", y = "PC1 (37 %)") +  
+  geom_segment(data = fit, aes(x = 0, xend = RDA1, y = 0, yend = PC1), 
+               arrow = arrow(length = unit(0.25, "cm")), col = "black") +
+  geom_text_repel(data = fit, aes(x = RDA1, y= PC1, label = species), 
+                  parse = T,col="black", size=4.5) +
+  theme(text = element_text(size=17), legend.text = element_text(size=rel(0.6)), 
+        legend.title = element_blank(), panel.background = element_rect(colour = "black", size=1), 
+        legend.position = "none") + 
+  geom_text(data = RDAscores, aes(x = RDA1, y= PC1, label = RDA$Name), 
+            size= 3, parse = T, col="black") +
+  guides(fill = guide_legend(override.aes=list(shape=21)), 
+         shape = guide_legend(override.aes=list(color="black"))) 
+
+
+#Figure 4b. Composition
+#Code for CA/CCA 
+
+CCA <- Data %>% 
+   filter(Fraction=='Dissolved') %>% 
+   mutate_at(vars(c(aHCH, bHCH, gHCH,PCB_18, PCB_28, PCB_31, PCB_33, PCB_47, PCB_52, 
+                   PCB_66, PCB_74, PCB_99, PCB_101, PCB_105, PCB_118, PCB_138, PCB_149, 
+                   PCB_153, PCB_180, PCB_187,trans_Chlordane, cis_Chlordane, trans_Nonachlor, 
+                   cis_Nonachlor,ppDDE, opDDD, ppDDD, opDDT, ppDDT, HCB, PeCB)), ~(./`Sum_OC`))  %>% 
+   mutate(Sum_PCB = PCB_18 + PCB_28 + PCB_31 + PCB_33 + PCB_47 + PCB_52 + PCB_66 + 
+         PCB_74 + PCB_99 + PCB_101 + PCB_105 + PCB_118 + PCB_138 + PCB_149 + 
+           PCB_153 + PCB_180 + PCB_187) %>%
+   mutate(Sum_PCB7=PCB_28+PCB_52+PCB_101+PCB_138+PCB_153+PCB_180) %>%
+   mutate(Sum_HCH= aHCH+bHCH+gHCH) %>%
+   mutate(Sum_DDTs = ppDDE+opDDD+ppDDD+opDDT+ppDDT) %>%
+   mutate(Sum_Chlordanes = trans_Chlordane+cis_Chlordane+trans_Nonachlor+cis_Nonachlor) %>%
+   mutate(Sum_Chlorobenzenes = HCB+PeCB) %>%
+   mutate(Sum_OC = Sum_Chlordanes+Sum_HCH+Sum_DDTs+Sum_PCB+PeCB+HCB) %>%
+   select(-c(Station, Longitude, Latitude, Fraction, Volume_L, Lab_ID, Sum_OC)) %>% 
+   relocate(Name, Type)
+  
+Composition <- CCA %>% select(c(aHCH:PCB_187)) 
+Name <- CCA %>% select(Name)
+Sums <- CCA %>% select(c(Sum_PCB, Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_Chlorobenzenes))
+Colors <- brewer.pal(5,'PuBuGn')
+
+CCA$Name <- factor(CCA$Name, levels = c("KV", "IF", "GA", "BE","KH"))
+
+cca.Tot <- cca(Composition ~ Type, data=CCA)
+cca.Tot
+anova(cca.Tot, by='margin')
+
+CCAscores <- scores(cca.Tot, display = "sites") %>% 
+  as.data.frame() 
+CCAvect <- scores(cca.Tot, display = "species") %>% 
+  as.data.frame()
+
+# Envfits
+fit2 <- envfit(cca.Tot, Sums, perm = 999, na.rm=T) %>% 
+  scores(., display = "vectors") %>% 
+  as.data.frame() %>% 
+  rownames_to_column("species")
+
+fit2$species <- factor(fit2$species, levels = c("Sum_PCB", "Sum_HCH", "Sum_Chlordanes","Sum_DDTs","Sum_Chlorobenzenes"),
+       ordered = TRUE,
+       labels = c(expression(paste(paste(Sigma, "PCB" [17]))), 
+            expression(paste(Sigma,'HCHs')),
+            expression(paste(Sigma,'Chlordanes')),
+            expression(paste(Sigma,'DDTs')),
+            expression(paste(Sigma,'Chlorobenzenes'))))
+#Plot
+Plot2 <- ggplot() +
+  geom_point(data = CCAscores, aes(x = CCA1, y = CA1, fill = CCA$Name, shape = CCA$Type), 
+             color= "gray45",size= 6.5) +
+  scale_fill_manual(values=c(Colors)) + 
+  theme_classic() + 
+  scale_shape_manual(values=c(23,21)) +
+  geom_vline(xintercept = c(0), color = "grey70", linetype = 2) + 
+  ylim(-2.5, 2.5) + xlim(-2.5, 2.5) +
+  geom_hline(yintercept = c(0), color = "grey70", linetype = 2)  +
+  labs(x = "CCA1 (28 %)", y = "CA1 (43 %)") +  
+  geom_segment(data = fit2, aes(x = 0, xend = CCA1, y = 0, yend = CA1), 
+               arrow = arrow(length = unit(0.25, "cm")), col = "black") +
+  geom_text_repel(data = fit2, aes(x = CCA1, y= CA1, label = species), 
+                  parse = T,col="black", size=4.5) +
+  theme(text = element_text(size = 17), legend.text = element_text(size=rel(0.6)), 
+        legend.title = element_blank(), panel.background = element_rect(colour = "black", size=1),
+        legend.position = "none") + 
+  geom_text(data = CCAscores, aes(x = CCA1, y= CA1, label = CCA$Name), 
+            size= 3, parse = T, col="black") +
+  guides(fill = guide_legend(override.aes=list(shape=21)), 
+         shape = guide_legend(override.aes=list(color="black")))
+
+Figure3 <- Plot1/Plot2
+
+# Save plot
+ggsave("Figure3.pdf", Figure3, width = 5, height = 8.8, device = cairo_pdf)
+```
+
+
+## Figure 4. Stacked barplot of composition and concentrations for main groups. 
+
+```{r Figure 4 Dataprep}
+# Compositional barplots allow us to inlcude samples where sampling volume was missing. First we assign samples to 'replicates' of each station (rep1-rep4) and take the average. Then I use the average concentration to make the compositional barplot and lay the replicates on top as concentrations on the second axis. 
+
+# Data preparation
+Reps <- Data %>%
+  select(-c(PCB_18, PCB_31, PCB_33, PCB_47, PCB_66, PCB_74, PCB_99, 
+            PCB_105, PCB_118, PCB_149, PCB_187, Volume_L, Latitude, Longitude, Station)) %>%
+  ungroup() %>%
+  pivot_longer(cols=-c(Name, Type, Fraction, Lab_ID), names_to = "Compound", values_to= 'Concentration') %>%
+  mutate(Reps= 'Rep1') %>%
+  mutate(Reps= ifelse(grepl("3075|3076|3083|3084|3091|3092|3095|3096|3099|3100|3107|3108|3113|3114",
+                            Lab_ID),'Rep2', Reps)) %>%
+  mutate(Reps= ifelse(grepl("3077|3078|3085|3086|3109|3110", Lab_ID), 'Rep3', Reps)) %>%
+  mutate(Reps= ifelse(grepl("3079|3080|3087|3088", Lab_ID), 'Rep4', Reps)) %>%
+  select(-Lab_ID) %>% 
+  pivot_wider(names_from = "Reps", values_from= 'Concentration') %>%
+  mutate(Average = rowMeans(select(.,starts_with("R")), na.rm = TRUE))
+
+Reps2 <- Data %>% 
+  select(-c(PCB_18, PCB_31, PCB_33, PCB_47, PCB_66, PCB_74, PCB_99, PCB_105, PCB_118, 
+            PCB_149, PCB_187, Latitude, Longitude, Station)) %>%
+  filter(Volume_L!=1) %>% 
+  arrange(Lab_ID, Volume_L) %>%
+  ungroup() %>%
+  pivot_longer(cols=-c(Lab_ID, Name, Type, Fraction, Volume_L), names_to = "Compound", values_to= 'Concentration') %>%
+  mutate(Reps= 'Rep1') %>%
+  mutate(Reps= ifelse(grepl("3075|3076|3083|3084|3091|3092|3095|3096|3099|3100|3107|3108|3113|3114",
+                            Lab_ID),'Rep2', Reps)) %>%
+  mutate(Reps= ifelse(grepl("3077|3078|3085|3086|3109|3110",
+                            Lab_ID), 'Rep3', Reps)) %>%
+  mutate(Reps= ifelse(grepl("3079|3080|3087|3088",
+                            Lab_ID), 'Rep4', Reps)) %>%
+  select(-c(Lab_ID, Volume_L)) %>%
+  pivot_wider(names_from = "Reps", values_from= 'Concentration')  %>%
+  filter(Compound!= 'Sum_OC') %>% 
+  mutate(Group = case_when(grepl("PCB", Compound) ~ "PCB", 
+                           grepl("DD", Compound) ~ "DDT", 
+                           grepl("HCH", Compound) ~ "HCH", 
+                           grepl("hl",  Compound) ~ "Chlordanes", 
+                           grepl("Sum", Compound) ~ "Sums"))  %>%
+  mutate(Group = ifelse(grepl("Sum",Compound), 'Sums', Group)) %>% 
+  group_by(Name, Type, Fraction, Group) %>% 
+  mutate(Rep1_c = sum(Rep1)) %>% 
+  mutate(Rep2_c = sum(Rep2)) %>% 
+  mutate(Rep3_c = sum(Rep3)) %>% 
+  mutate(Rep4_c = sum(Rep4)) %>% 
+  select(-c(Rep1,Rep2,Rep3,Rep4))
+
+BarHCH <- Reps %>% 
+  select(Name, Type, Fraction, Compound, Average) %>% 
+  pivot_wider(names_from = "Compound", values_from= 'Average') %>% 
+  select(Name, Type, Fraction, aHCH, bHCH, gHCH, Sum_HCH) %>%  
+  mutate_at(vars(c(aHCH, bHCH, gHCH)), ~(./`Sum_HCH`*100))  %>% 
+  mutate(Sum_HCH=aHCH + bHCH +gHCH) %>% 
+  select(Name, Type, Fraction, aHCH, bHCH, gHCH) 
+
+BarDDT <- Reps %>% 
+  select(Name, Type, Fraction, Compound, Average) %>% 
+  pivot_wider(names_from = "Compound", values_from= 'Average') %>% 
+  select(Name, Type, Fraction, ppDDE, opDDD, ppDDD, opDDT, ppDDT,Sum_DDTs) %>% 
+  mutate_at(vars(c(ppDDE, opDDD, ppDDD, opDDT, ppDDT)), ~(./`Sum_DDTs`*100))  %>% 
+  mutate(Sum_DDTs=ppDDE + opDDD + ppDDD + opDDT +ppDDT) %>% 
+  select(Name, Type, Fraction, ppDDE, opDDD, ppDDD, opDDT, ppDDT) 
+
+BarChlordane <- Reps %>% 
+  select(Name, Type, Fraction, Compound, Average) %>% 
+  pivot_wider(names_from = "Compound", values_from= 'Average') %>% 
+  select(Name, Type, Fraction, trans_Chlordane, cis_Chlordane, trans_Nonachlor, cis_Nonachlor, Sum_Chlordanes) %>%
+  mutate_at(vars(c(trans_Chlordane, cis_Chlordane, trans_Nonachlor, cis_Nonachlor)), ~(./`Sum_Chlordanes`*100))  %>%
+  mutate(Sum_Chlordanes=trans_Chlordane + cis_Chlordane + trans_Nonachlor + cis_Nonachlor)  %>% 
+  select(Name, Type, Fraction, trans_Chlordane, cis_Chlordane, trans_Nonachlor, cis_Nonachlor)
+    
+BarPCB7 <- Reps %>% 
+  select(Name, Type, Fraction, Compound, Average) %>% 
+  pivot_wider(names_from = "Compound", values_from= 'Average') %>% 
+  select(Name, Type, Fraction, PCB_28, PCB_52, PCB_101, PCB_138, PCB_153, PCB_180, Sum_PCB7) %>% 
+  mutate_at(vars(c(PCB_28, PCB_52, PCB_101, PCB_138, PCB_153, PCB_180)), ~(./`Sum_PCB7`*100))  %>% 
+  mutate(Sum_PCB7=PCB_28 +PCB_52+PCB_101+PCB_138+PCB_153+PCB_180) %>% 
+  select(Name, Type, Fraction, PCB_28, PCB_52, PCB_101, PCB_138, PCB_153, PCB_180)
+
+BarTotal <- Reps %>% 
+  select(Name, Type, Fraction, Compound, Average) %>% 
+  pivot_wider(names_from = "Compound", values_from= 'Average') %>% 
+  select(Name, Type, Fraction, Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_Chlorobenzenes, Sum_PCB, Sum_OC) %>% 
+  mutate_at(vars(c(Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_Chlorobenzenes, Sum_PCB)), ~(./`Sum_OC`*100)) %>% 
+  mutate(Sum_OC=Sum_HCH + Sum_DDTs + Sum_Chlordanes + Sum_Chlorobenzenes +Sum_PCB) %>% 
+  select(Name, Type, Fraction, Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_Chlorobenzenes, Sum_PCB) 
+    
+Barplot5 <- full_join(BarHCH, BarDDT)
+Barplot4 <- full_join(BarChlordane, BarPCB7)
+Barplot3 <- full_join(Barplot4, Barplot5)
+Barplot2 <- full_join(Barplot3, BarTotal)
+
+Barplot <- Barplot2 %>% 
+ pivot_longer(cols=-c(Name, Type, Fraction), names_to = "Compound", values_to= 'Percent') %>%
+ mutate(Group = case_when(grepl("PCB", Compound) ~ "PCB", grepl("DD", Compound) ~ "DDT", grepl("HCH", Compound) ~ "HCH", grepl("hl",  Compound) ~ "Chlordanes", grepl("Sum", Compound) ~ "Sums"))  %>%
+ mutate(Group = ifelse(grepl("Sum",Compound), 'Sums', Group))
+
+Barplot <- full_join(Barplot, Reps2) 
+Barplot <- Barplot %>%
+ rename(Rep1='Rep1_c', Rep2= 'Rep2_c', Rep3='Rep3_c', Rep4='Rep4_c', ) %>%
+ mutate(Type2 = paste0(Type, Fraction)) 
+```
+
+
+```{r Figure 4}
+
+# Stacked barplots showing composition of congeners in each contaminant group
+
+BarSums <-subset(Barplot, Group=='Sums')
+BarPest <-subset(Barplot, Group=='Chlordanes')
+BarDDT <-subset(Barplot, Group=='DDT')
+BarPCB7 <-subset(Barplot, Group=='PCB')
+BarHCH <-subset(Barplot, Group=='HCH')
+BarPCBs <-subset(Barplot, Group=='Sum_PCBs')
+
+#Sums
+BarSums$Name <- factor(BarSums$Name,levels = c("KV", "IF", "GA", "BE","KH"))
+BarSums$Type2 <- factor(BarSums$Type2,levels = c("RiverDissolved", "RiverParticulate", "FjordDissolved", "FjordParticulate"))
+BarSums$Compound <- factor(BarSums$Compound,levels = c("Sum_PCB", "Sum_DDTs", "Sum_HCH", "Sum_Chlordanes","Sum_Chlorobenzenes"))
+
+ylim.prim_SUMS <- c(0, 100)  
+ylim.sec_SUMS <- c(0, 140)    
+
+b <- diff(ylim.prim_SUMS)/diff(ylim.sec_SUMS)
+a <- b*(ylim.prim_SUMS[1] - ylim.sec_SUMS[1])
+
+SUMS <- ggplot(BarSums, aes(Name, y = Percent, fill= Compound)) + 
+  geom_bar(stat="identity") + 
+  scale_fill_manual(values = c("lightpink4","peachpuff3","#B4B7B9","#8B9DAF","#394165","grey13")) + 
+  theme_classic() + facet_grid(~Type2) + xlab(NULL) + 
+  geom_point(aes(y = a+Rep1*b),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = a+Rep2*b),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = a+Rep3*b),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = a+Rep4*b),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  scale_y_continuous("% OC", sec.axis = sec_axis(~ (. - a)/b, name = "[OC] (pg/L)")) + 
+  theme(text = element_text(size=18)) + 
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(), 
+        legend.text=element_text(size=rel(0.8)), legend.key.size = unit(0.25, "cm"))  
+
+#PCB7
+BarPCB7$Name <- factor(BarPCB7$Name,levels = c("KV", "IF", "GA", "BE","KH"))
+BarPCB7$Type2 <- factor(BarPCB7$Type2,levels = c("RiverDissolved", "RiverParticulate", "FjordDissolved", "FjordParticulate"))
+BarPCB7$Compound <- factor(BarPCB7$Compound,levels = c("PCB_28","PCB_52","PCB_101","PCB_118","PCB_138","PCB_153","PCB_180"))
+
+ylim.prim_PCB <- c(0, 100)  
+ylim.sec_PCB <- c(0, 30)    
+
+d <- diff(ylim.prim_PCB)/diff(ylim.sec_PCB)
+c <- d*(ylim.prim_PCB[1] - ylim.sec_PCB[1])
+
+PCB7 <-ggplot(BarPCB7, aes(Name, y = Percent, fill= Compound)) + 
+  geom_bar(stat="identity") +
+  scale_fill_manual(values= c("lightpink4","peachpuff3","#B4B7B9","#8B9DAF","#394165","grey13")) + 
+  theme_classic() + geom_col() +
+  facet_grid(~Type2) + 
+  geom_point(aes(y = c+Rep1*d),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = c+Rep2*d),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = c+Rep3*d),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = c+Rep4*d),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) +
+  scale_y_continuous("% PCB7", sec.axis = sec_axis(~ (. - c)/d, name = "[PCB7] (pg/L)")) + 
+  theme(text = element_text(size=18))+xlab(NULL) + 
+  theme(strip.background = element_blank(), strip.text.x = element_blank()) +
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(), 
+        legend.text=element_text(size=rel(0.8)), legend.title = element_blank(), legend.key.size = unit(0.25, "cm"))
+
+#DDT
+BarDDT$Name <- factor(BarDDT$Name,levels = c("KV", "IF", "GA", "BE","KH"))
+BarDDT$Type2 <- factor(BarDDT$Type2,levels = c("RiverDissolved", "RiverParticulate", "FjordDissolved", "FjordParticulate"))
+
+ylim.prim_DDT <- c(0, 100)  
+ylim.sec_DDT <- c(0, 40)   
+
+f <- diff(ylim.prim_DDT)/diff(ylim.sec_DDT)
+e <- f*(ylim.prim_DDT[1] - ylim.sec_DDT[1])
+
+DDT <-ggplot(BarDDT, aes(Name, y = Percent, fill= Compound)) + 
+  geom_bar(stat="identity") + 
+  scale_fill_manual(values= c("lightpink4","peachpuff3","#B4B7B9","#8B9DAF","#394165","grey13")) + 
+  theme_classic() + geom_col() + facet_grid(~Type2) + 
+  geom_point(aes(y = e+Rep1*f),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = e+Rep2*f),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = e+Rep3*f),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) +
+  geom_point(aes(y = e+Rep4*f),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) +
+  scale_y_continuous("% DDTs", sec.axis = sec_axis(~ (. - e)/f, name = "[DDTs] (pg/L)")) + 
+  theme(text = element_text(size=18)) + xlab(NULL) + 
+  theme(strip.background = element_blank(), strip.text.x = element_blank()) + 
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        legend.text=element_text(size=rel(0.8)), legend.key.size = unit(0.25, "cm"), legend.title = element_blank())
+
+#HCH
+BarHCH$Name <- factor(BarHCH$Name,levels = c("KV", "IF", "GA", "BE","KH"))
+BarHCH$Type2 <- factor(BarHCH$Type2,levels = c("RiverDissolved", "RiverParticulate", "FjordDissolved", "FjordParticulate"))
+
+ylim.prim_HCH <- c(0, 100)  
+ylim.sec_HCH <- c(0, 100)    
+
+h <- diff(ylim.prim_HCH)/diff(ylim.sec_HCH)
+g <- h*(ylim.prim_HCH[1] - ylim.sec_HCH[1])
+
+HCH <- ggplot(BarHCH, aes(Name, y = Percent, fill= Compound)) + 
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values= c("lightpink4","peachpuff3","#8B9DAF","#394165")) +
+  theme_classic() + geom_col() + theme_classic() + xlab(NULL) +
+  facet_grid(~Type2) +
+  geom_point(aes(y = g+Rep1*h),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) +
+  geom_point(aes(y = g+Rep2*h),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) +
+  geom_point(aes(y = a+Rep3*b),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) +
+  geom_point(aes(y = g+Rep4*h),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) +
+  scale_y_continuous("% HCHs", sec.axis = sec_axis(~ (. - g)/h, name = "[HCHs] (pg/L)")) + 
+  theme(text = element_text(size=18)) + 
+  theme(strip.background = element_blank(), strip.text.x = element_blank()) +
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(),
+        legend.text=element_text(size=rel(0.8)), legend.key.size = unit(0.25, "cm"), 
+        legend.title = element_blank())
+
+#Pesticides
+BarPest$Name <- factor(BarPest$Name,levels = c("KV", "IF", "GA", "BE","KH"))
+BarPest$Type2 <- factor(BarPest$Type2,levels = c("RiverDissolved", "RiverParticulate", "FjordDissolved", "FjordParticulate"))
+
+ylim.prim_Pest <- c(0, 100)  
+ylim.sec_Pest <- c(0, 10)    #10 
+
+j <- diff(ylim.prim_Pest)/diff(ylim.sec_Pest)
+i <- j*(ylim.prim_Pest[1] - ylim.sec_Pest[1])
+
+Pest <- ggplot(BarPest, aes(Name, y = Percent, fill= Compound)) + 
+  geom_bar(stat="identity")+scale_fill_manual(values =c("lightpink4","peachpuff3","#8B9DAF","#394165")) +
+  theme_classic() + 
+  facet_grid(~Type2) + geom_col() + xlab(NULL) +
+  geom_point(aes(y = i+Rep1*j), shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = i+Rep2*j),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = i+Rep3*j),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) + 
+  geom_point(aes(y = i+Rep4*j),shape = 21,colour = "white", fill = "black", size = 4, stroke = 0.5) +
+  scale_y_continuous("% Chlordanes", sec.axis = sec_axis(~ (. - i)/j, name = "[Chlor.] (pg/L)")) + 
+  theme(text = element_text(size=18)) + 
+  theme(strip.background = element_blank(),strip.text.x = element_blank(), 
+        legend.text=element_text(size=rel(0.8)), legend.key.size = unit(0.25, "cm"), legend.title = element_blank())
+
+
+# Compile figures
+Figure4 <- SUMS/PCB7/DDT/HCH/Pest
+
+# Save plot
+ggsave("Figure4.pdf", Figure4 , width = 20, height = 18, device = cairo_pdf)
+```
+
+
+## Figure 5. Isomer Ratios
+
+```{r Figure 5}
+
+# Pesticide Isomer ratios. 
+
+Isomer_Ratios <- Data %>% 
+  filter(Volume_L != 1) %>% 
+  mutate(Ratio_HCH=(aHCH*100)/(gHCH*100)) %>% 
+  mutate(Ratio_Chlor=(trans_Chlordane*100)/(cis_Chlordane*100)) %>% 
+  mutate(Ratio_Nona=(trans_Nonachlor*100)/(cis_Nonachlor*100)) %>% 
+  mutate(Ratio_DDT=((opDDD+ppDDD+ppDDE)*100)/((opDDT+ppDDT)*100)) %>% 
+  select(Station, Type, Fraction, Ratio_HCH, Ratio_Chlor, Ratio_Nona, Ratio_DDT) 
+
+Isomer_Ratios$Type <- factor(Isomer_Ratios$Type,levels = c("River", "Fjord"))
+Isomer_Ratios$Station <- factor(Isomer_Ratios$Station,levels = c("KV", "IF", "GA", "BE", "KH"))
+
+Plot1 <- Isomer_Ratios %>%
+  ggplot(aes(x=Type, y=Ratio_HCH, fill = Fraction)) + 
+  geom_boxplot(outliers = FALSE, outlier.shape = NA) + 
+  xlab(NULL) + scale_fill_manual(values=c("#8B9DAF","lightsalmon4")) + 
+  theme_classic() + 
+  geom_point(position=position_jitterdodge(), stat='identity',shape = 21, size = 2,alpha=1) +
+  ylab(expression(paste(alpha,'-HCH: ',gamma,'-HCH'))) + xlab(NULL) + theme(text = element_text(size=14), legend.position = "none")
+
+Plot2 <- Isomer_Ratios %>%
+  ggplot(aes(x=Type, y=Ratio_Chlor,fill=Fraction)) + 
+  geom_boxplot(outliers = FALSE, outlier.shape = NA) + 
+  xlab(NULL) + scale_fill_manual(values=c("#8B9DAF","lightsalmon4")) + 
+  theme_classic() + 
+  geom_point(position=position_jitterdodge(), stat='identity',shape = 21, size = 1.5,alpha=1) + 
+  ylab(expression(italic("trans:cis-")-"chlordane")) + xlab(NULL) + theme(text = element_text(size=14), legend.position = "none") + ylim(0,1.5)
+
+Plot3<- Isomer_Ratios %>%
+  ggplot(aes(x=Type, y=Ratio_Nona,fill=Fraction)) + 
+  geom_boxplot(outliers = FALSE, outlier.shape = NA) + xlab(NULL) +
+  scale_fill_manual(values=c("#8B9DAF","lightsalmon4")) + theme_classic() + 
+  theme(legend.position='none') +
+  geom_point(position=position_jitterdodge(), stat='identity',shape = 21, size = 2,alpha=1) + 
+  ylim(0.5,2) + ylab("trans:cis Nona") + xlab(NULL) + theme(text = element_text(size=18))
+
+Plot4 <- Isomer_Ratios %>%
+  ggplot(aes(x=Type, y=Ratio_DDT,fill=Fraction)) + 
+  geom_boxplot(outliers = FALSE, outlier.shape = NA) + xlab(NULL) +
+  scale_fill_manual(values=c("#8B9DAF","lightsalmon4")) + theme_classic() + 
+  geom_point(position=position_jitterdodge(), stat='identity',shape = 21, size = 2,alpha=1) + 
+  ylab("(DDD+DDE)/DDT") + xlab(NULL) + theme(text = element_text(size=14))
+
+# Print Figure
+p <- (((Plot1|Plot2)|Plot4) + plot_annotation(tag_levels = 'A'))
+
+ggsave("Figure5.pdf", p, width = 10, height = 3.5, device = cairo_pdf)
+```
+
+``` {r Ratio Tests}
+
+# Wilcoxon rank sum tests of isomer ratios between river and fjord stations for each fraction separately. 
+
+Dis <- Isomer_Ratios %>%
+  filter(Fraction=='Dissolved')  %>%
+  select(-Fraction) %>% 
+  pivot_longer(cols=-c(Type, Station), names_to = "Compound", values_to= 'Concentration') %>%   
+  nest(-Compound) %>%                  
+  mutate(results = map(data, ~tidy(wilcox.test(Concentration ~ Type, data = .)))) %>%
+  select(-c(data)) %>%
+  unnest(results)
+
+Part <- Isomer_Ratios %>%
+  filter(Fraction=='Particulate')  %>%
+  select(-Fraction) %>% 
+  pivot_longer(cols=-c(Type, Station), names_to = "Compound", values_to= 'Concentration') %>%   
+  nest(-Compound) %>%                  
+  mutate(results = map(data, ~tidy(wilcox.test(Concentration ~ Type, data = .)))) %>%
+  select(-c(data)) %>%
+  unnest(results)
+
+Dis %>% 
+  select(-c(method, alternative))  %>% 
+  kable(caption= 'Dissolved: Results of Wilcoxon Rank Sum Two-sided Test btw Fjord and River Dissolved samples', digits=4) %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  row_spec(0, bold = TRUE)
+
+Part  %>% 
+  select(-c(method, alternative))  %>% 
+  kable(caption= 'Particulate: Results of Wilcoxon Rank Sum Two-sided Test btw Fjord and River Particulate samples', digits=4) %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  row_spec(0, bold = TRUE)
+
+# Table with summary stats
+Table <- Isomer_Ratios %>% 
+  pivot_longer(cols= -c(Station, Type, Fraction), names_to = "Compound", values_to= 'Concentration') %>% 
+  group_by(Compound, Type, Fraction)  %>% 
+  arrange(Compound, Type, Fraction)  %>% 
+  summarize(n=n(), Mean=mean(Concentration, na.rm=T), stdev= sd(Concentration, na.rm=T), min = min(Concentration), max = max(Concentration)) 
+
+Table %>% 
+  kable(caption= 'Pesticide Isomer Ratios', digits=2, booktabs = T, align = c("r"))  %>% 
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+
+## Figure 6. Ratio (Part: Diss) vs. Log KOW for each compound. 
+
+```{r Figure 6}
+
+# Plot partitioning (part:Diss) vs LogKOW of each contaminant
+
+Ratio2 <- Data %>%
+  select(-c(PCB_18, PCB_31, PCB_33, PCB_47, PCB_66, PCB_74, PCB_99, PCB_105, 
+            PCB_118, PCB_149, PCB_187, Latitude, Longitude, Name)) %>%
+  arrange(Lab_ID, Volume_L) %>%
+  ungroup() %>%
+  pivot_longer(cols=-c(Lab_ID, Station, Type, Fraction, Volume_L), 
+               names_to = "Compound", values_to= 'Concentration') %>%
+  mutate(Reps= 'Rep1') %>%
+  mutate(Reps= ifelse(grepl("3075|3076|3083|3084|3091|3092|3095|3096|3099|3100|3107|3108|3113|3114",Lab_ID),
+                      'Rep2', Reps)) %>%
+  mutate(Reps= ifelse(grepl("3077|3078|3085|3086|3109|3110",Lab_ID), 'Rep3', Reps)) %>%
+  mutate(Reps= ifelse(grepl("3079|3080|3087|3088",Lab_ID), 'Rep4', Reps)) %>%
+  select(-c(Lab_ID, Volume_L)) %>%
+  filter(!Compound %in% c("Heptachlor", "Mirex","Sum_PCB", "Sum_PCB7","Sum_Chlordanes",
+                          "Sum_HCH", "Sum_DDTs", "Sum_Chlorobenzenes", "Sum_OC")) %>%
+  pivot_wider(names_from="Fraction", values_from="Concentration") %>%
+  mutate(Ratio=(Particulate*100)/(Dissolved*100)) %>%
+  ungroup()
+  
+Ratio <- full_join(Ratio2, LogKow) %>% drop_na(Station) %>% 
+  group_by(logKOW)
+
+Ratio$logKOW <- as.factor(Ratio$logKOW)
+Ratio$Type <- factor(Ratio$Type,levels = c("Fjord", "River"))
+
+Ratio_plot <- ggplot(Ratio, aes(x=logKOW, y=Ratio, fill=Type)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  xlab("Log Kow") + 
+  ylab("Particulate:Dissolved") + 
+  theme_classic() + 
+  scale_fill_manual(values= c("#8B9DAF","peachpuff3")) + 
+  geom_point(position=position_jitterdodge(), stat='identity',shape = 21, size = 2,alpha=1) + 
+  scale_y_log10() + ylim(0,4) + theme(text = element_text(size=17)) +
+  geom_hline(yintercept=1,linetype="dashed")
+
+# Print Figure
+ggsave("Figure6.pdf", Ratio_plot, width = 11, height = 4, device = cairo_pdf)
+```
+
+
+## Figure S2. TS diagram
+
+```{r Figure S2}
+# TS diagram in Mikko's PlotSvalbard package
+
+CTD$Name <- factor(CTD$Name,levels = c("IF", "GA", "BE","KH"))
+
+FigureS2 <- ts_plot(CTD, temp_col = "Temp", sal_col = "Salinity",
+                    WM = kongsfjord_watermasses, color_wmpoly = "black", color = "Name", zoom = TRUE, nlevels = 6,
+                    color_scale = c("cyan3","burlywood4","darkolivegreen","deepskyblue4"),
+                    symbol_shape=16, symbol_size = 4,
+                    symbol_alpha = 1, color_var_name = NULL,
+                    margin_width = 0.15, margin_height = 0.2,
+                    plot_data = TRUE, base_size = 12)
+
+# Save plot
+ggsave("FigureS2.pdf", FigureS2, width = 5, height = 5, device = cairo_pdf)
+```
+

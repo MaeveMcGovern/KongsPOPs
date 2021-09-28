@@ -1,0 +1,552 @@
+---
+title: "Data preparation for 'Small Arctic rivers transport legacy contaminants to coastal areas in Kongsfjorden, Svalbard'"
+author: "Maeve McGovern"
+date: "September, 2020"
+output: html_document 
+---
+
+R workflow for uploading and analysis of raw data files from NILU Lab. Quantified contaminants include PCBs, DDTs, HCHs and Chlordane pesticides. Data are uploaded, and cleaned before performing field-blank corrections and substitutions of non-detects.
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo=T, message=F, warning=F)
+
+#For loading data
+library(fs)
+library(readxl)
+
+#For data prep
+library(tidyverse)
+
+#For plots formatting supplemental tables
+library(kableExtra)
+
+# Metadata file
+Fielddata <- read_csv('Secondary_Data/Fielddata.csv') 
+```
+
+
+# Step 1. Load Data
+
+Raw data files are loaded according to contaminant group (PCBs, DDTs/HCHs and Chlordane pesticides).  Concentrations of each compound are loaded from tab 1 of raw data files while actual LOD values loaded from tab 2 of raw data files. Metadata (station names, type/fraction and volume sampled) are loaded from the same raw files, but are saved and cleaned in a separate data frame. 
+
+```{r Load data}
+# Load data from tab 1 of raw data files
+# Actual LOD values are in tab 2 and are loaded separately
+
+# PCBs
+data_dir <- "Raw_Data/PCB/" #Folder with PCB results
+PCBs <- data_dir %>% 
+  dir_ls(regexp ="\\.xlsx$") %>% 
+  map_dfr(read_excel, col_names = F, .id = "source") %>% 
+  separate(col= source, into = c("File","Group","Sample"), sep = '/') %>% 
+  separate(Sample, c("Year", "Lab_ID"), sep = "b2013")%>% 
+  separate(Lab_ID, c("Lab_ID", "X"), sep = ".x") %>% 
+  rename(Compound = "...1", Congener = "...3", Is_LOD = "...4", Concentration = "...5", Lab = "...6", Recovery = "...7") %>% 
+  select(-c(1,3,5,7,13:17)) %>% 
+  drop_na(Compound) %>%
+  filter(!Compound %in% c("<:", "* :", "i:","b:","g:","TE (1998):","TE (2005):", "Compound", "Structure"), !grepl('Results', Compound)) %>%
+  mutate(Concentration = as.numeric(Concentration), Recovery = as.numeric(Recovery)) %>%
+  mutate(Is_LOD, Is_LOD= ifelse(grepl("<",Is_LOD), -1, 1)) %>% #LOD values are changed to negative in the concentration value. 
+  mutate(Concentration=(Is_LOD*Concentration)) %>%
+  mutate(Compound= case_when(grepl("'",Compound )~"PCB", TRUE~ Compound)) %>%
+  unite(Compound, Compound, Congener, sep = "_", remove = TRUE, na.rm = T)
+
+PCBs_LOD <- data_dir %>% 
+  dir_ls(regexp ="\\.xlsx$") %>% 
+  map_dfr(read_excel, col_names = F, .id = "source", sheet = "Rådata") %>% 
+  separate(col= source, into = c("File","Group","Sample"), sep = '/') %>% 
+  separate(Sample, c("Year", "Lab_ID"), sep = "b2013") %>% 
+  separate(Lab_ID, c("Lab_ID", "X"), sep = ".x")   %>% 
+  rename(Compound = "...2",LOD = "...8") %>% 
+  select(Group,Lab_ID, LOD, Compound) %>% 
+  drop_na(LOD, Compound) %>%
+  filter(!grepl("13C|Name|TCN|Total", Compound)) %>%
+  mutate(LOD = as.numeric(LOD)) %>%
+  mutate(Compound = str_replace_all(Compound, "\\(", "_"))  %>%
+  mutate(Compound = str_replace_all(Compound, "\\)| ", ""))
+
+
+# DDTs/HCHs
+data_dir2 <- "Raw_Data/DDT/" #Folder with DDT/HCH results
+DDTs <- data_dir2 %>% 
+  dir_ls(regexp ="\\.xlsx$") %>% 
+  map_dfr(read_excel, col_names = F, .id = "source") %>% 
+  separate(col= source, into = c("File","Group","Sample"), sep = '/') %>% 
+  separate(Sample, c("Year", "Lab_ID"), sep = "t2013") %>% 
+  separate(Lab_ID, c("Lab_ID", "X"), sep = ".x") %>%
+  rename(Compound = "...1", Is_LOD = "...3", Concentration = "...4", Lab = "...5", Recovery = "...6")%>%
+  select(-c(1,3,5,7,12,13)) %>% 
+  drop_na(Compound) %>%
+  filter(!Compound %in% c("< :", "* :", "i :","b :","g :", "Compound", "Structure"), !grepl('Results', Compound)) %>%
+  mutate(Concentration = as.numeric(Concentration), Recovery = as.numeric(Recovery)) %>%
+  mutate(Is_LOD, Is_LOD= ifelse(grepl("<",Is_LOD), -1, 1)) %>%
+  mutate(Concentration=(Is_LOD*Concentration)) %>%
+  mutate(Compound = str_replace_all(Compound, '\\,|\'|-', '')) 
+
+
+DDTs_LOD <- data_dir2 %>% 
+  dir_ls(regexp ="\\.xlsx$") %>% 
+  map_dfr(read_excel, col_names = F, .id = "source", sheet = "Rådata") %>% 
+  separate(col= source, into = c("File","Group","Sample"), sep = '/') %>% 
+  separate(Sample, c("Year", "Lab_ID"), sep = "t2013") %>% 
+  separate(Lab_ID, c("Lab_ID", "X"), sep = ".x")   %>% 
+  rename(Compound = "...2",LOD = "...8") %>% 
+  select(Group,Lab_ID, LOD, Compound) %>% 
+  drop_na(LOD, Compound) %>%
+  filter(!grepl("13|Name|TCN", Compound)) %>%
+  mutate(LOD = as.numeric(LOD)) %>%
+  mutate(Compound = str_replace_all(Compound, '\\,|\'|-', '')) 
+
+
+# Chlordane Pesticides
+data_dir3 <- "Raw_Data/Pesticid/" #Folder with pesticide results
+Chlordanes <- data_dir3 %>% 
+  dir_ls(regexp ="\\.xlsx$") %>% 
+  map_dfr(read_excel, col_names = F, .id = "source") %>% 
+  separate(col= source, into = c("File", "Group","Sample"), sep = '/') %>% 
+  separate(Sample, c("Year", "Lab_ID"), sep = "o2013") %>% 
+  separate(Lab_ID, c("Lab_ID", "X"), sep = ".x") %>%
+  rename(Compound = "...1",Is_LOD = "...3",Concentration = "...4",Lab = "...5",Recovery = "...6")%>%
+  select(-c(1,3,5,7,12,13,14,15)) %>% 
+  drop_na(Compound) %>%
+  filter(!Compound %in% c("< :", "* :", "i :","b :","g :", "Compound", "Structure"), !grepl('Results', Compound)) %>%
+  filter(Compound %in% c("trans-Chlordane", 'cis-Chlordane', 'trans-Nonachlor', 'cis-Nonachlor', 'Heptachlor', 'Mirex'))%>%
+  mutate(Compound = str_replace_all(Compound, '-', '_')) %>%
+  mutate(Concentration = as.numeric(Concentration),Recovery = as.numeric(Recovery)) %>%
+  mutate(Is_LOD, Is_LOD= ifelse(grepl("<",Is_LOD), -1, 1)) %>%
+  mutate(Concentration=(Is_LOD*Concentration)) 
+
+
+Chlordanes_LOD <- data_dir3 %>% 
+  dir_ls(regexp ="\\.xlsx$") %>% 
+  map_dfr(read_excel, col_names = F, .id = "source", sheet = "Rådata") %>% 
+  separate(col= source, into = c("File", "Group","Sample"), sep = '/') %>% 
+  separate(Sample, c("Year", "Lab_ID"), sep = "2013") %>% 
+  separate(Lab_ID, c("Lab_ID", "X"), sep = ".x")   %>% 
+  rename(Compound = "...2",LOD = "...8")   %>% 
+  select(Group,Lab_ID, LOD, Compound) %>% 
+  drop_na(LOD, Compound) %>%
+  filter(!grepl("13|14|Name|TCN", Compound)) %>%
+  filter(Compound %in% c("trans-Chlordane", 'cis-Chlordane', 'trans-Nonachlor', 'cis-Nonachlor', 'Heptachlor', 'Mirex'))%>%
+  mutate(Compound = str_replace_all(Compound, '-', '_')) %>%
+  mutate(LOD = as.numeric(LOD)) 
+```
+
+
+```{r Metadata}
+
+# Load Metadata files
+data_dir <- "Raw_Data/PCB/"
+Metadata <- data_dir %>% 
+  dir_ls(regexp = "\\.xlsx$") %>% 
+  map_dfr(read_excel, col_names = F, .id = "source") %>% 
+  separate(col= source, into = c("File","Group","Sample"), sep = '/') %>% 
+  separate(col= Sample, into = c("Year","Sample"), sep = '2013') %>% 
+  separate(col= Sample, into = c("Lab_ID","X"), sep = '.x') %>%
+  select(c(2,4,7,8)) %>% 
+  drop_na(...2) %>% 
+  drop_na(...3) %>% 
+  pivot_wider(names_from = "...2", values_from = "...3") %>%
+  separate(col= 'Customers sample ID:', into = c("Station","Type"), sep = ' ') %>%
+  rename(Fraction = "Sample type:") %>% 
+  rename(Volume = "Sample amount:") %>%
+  select(c(Group, Lab_ID, Station, Type, Fraction, Volume))%>% 
+  mutate(Station = case_when(grepl("Fel",Station) ~ "BLANK",grepl("Bay",Station) ~ "BA", grepl("Kva",Station) ~"KH", grepl("Gås", Station) ~"GA", grepl("Indre", Station) ~"IF", grepl("Helt", Station) ~"KV")) %>% 
+  mutate(Type = case_when(grepl("Mar", Type) ~ "Fjord",TRUE ~ "River" )) %>% 
+  mutate(Fraction= case_when(grepl("fil", Fraction) ~ "Particulate",TRUE ~ "Dissolved" )) %>% 
+  mutate(Volume = as.numeric(Volume)) %>% 
+  arrange(Type, Station, Volume) %>% 
+  mutate(New_Volume=Volume) %>% 
+  mutate(New_Volume=replace(New_Volume, Lab_ID==3101, 100)) 
+
+data_dir2 <- "Raw_Data/DDT/"
+Metadata2 <- data_dir2 %>% 
+  dir_ls(regexp = "\\.xlsx$") %>% 
+  map_dfr(read_excel, col_names = F, .id = "source") %>% 
+  separate(col= source, into = c("File","Group","Sample"), sep = '/') %>% 
+  separate(col= Sample, into = c("Year","Sample"), sep = '2013') %>% 
+  separate(col= Sample, into = c("Lab_ID","X"), sep = '.x') %>%
+  select(c(Group, Lab_ID, ...2,...3)) %>% 
+  drop_na(...2) %>% 
+  drop_na(...3) %>% 
+  pivot_wider(names_from = "...2", values_from = "...3") %>%
+  separate(col= 6, into = c("Station","Type"), sep = ' ') %>%
+  rename(Fraction = 8) %>% 
+  rename(Volume = 9) %>%
+  select(c(Group, Lab_ID, Station, Type, Fraction, Volume))%>%
+  mutate(Station = case_when(grepl("Fel",Station) ~ "BLANK",grepl("Bay",Station) ~ "BA", grepl("Kva",Station) ~"KH", grepl("Gås", Station) ~"GA", grepl("Indre", Station) ~"IF", grepl("Helt", Station) ~"KV")) %>% 
+  mutate(Type = case_when(grepl("Mar", Type) ~ "Fjord",TRUE ~ "River" )) %>% 
+  mutate(Fraction= case_when(grepl("fil", Fraction) ~ "Particulate",TRUE ~ "Dissolved" )) %>% 
+  mutate(Volume = as.numeric(Volume)) %>% 
+  arrange(Type, Station, Volume) %>% 
+  mutate(Volume= ifelse(grepl("3114",Lab_ID), 1, Volume)) 
+
+data_dir3 <- "Raw_Data/Pesticid/"
+Metadata3 <- data_dir3 %>% 
+  dir_ls(regexp = "\\.xlsx$") %>% 
+  map_dfr(read_excel, col_names = F, .id = "source") %>% 
+  separate(col= source, into = c("File", "Group","Sample"), sep = '/') %>% 
+  separate(col= Sample, into = c("Year","Sample"), sep = '2013') %>% 
+  separate(col= Sample, into = c("Lab_ID","X"), sep = '.x') %>%
+  select(c(Group, Lab_ID, ...2,...3)) %>% 
+  drop_na(...2) %>% 
+  drop_na(...3) %>% 
+  pivot_wider(names_from = "...2", values_from = "...3") %>%
+  separate(col= 6, into = c("Station","Type"), sep = ' ') %>%
+  rename( Fraction = 9) %>% 
+  rename( Volume = 10) %>%
+  select(c(Group, Lab_ID, Station, Type, Fraction, Volume))%>%
+  mutate(Station = case_when(grepl("Fel",Station) ~ "BLANK",grepl("Bay",Station) ~ "BA", grepl("Kva",Station) ~"KH", grepl("Gås", Station) ~"GA", grepl("Indre", Station) ~"IF", grepl("Helt", Station) ~"KV")) %>% 
+  mutate(Type = case_when(grepl("Mar", Type) ~ "Fjord",TRUE ~ "River" )) %>% 
+  mutate(Fraction= case_when(grepl("fil", Fraction) ~ "Particulate",TRUE ~ "Dissolved" )) %>% 
+  mutate(Volume = as.numeric(Volume)) %>% 
+  arrange(Type, Station, Volume)
+```
+
+
+
+```{r Combine}
+
+# Combine the three datasets (concentrations of PCBs/DDTs/Chlordanes, LODs, and meta-data). 
+
+# Join contaminant data 'Concentrations'
+All2 <- full_join(PCBs,DDTs)
+Concentrations <- full_join(All2,Chlordanes) %>%
+  select(Group, Lab_ID, Compound, Concentration) %>%
+  filter(!grepl("Sum",Compound)) 
+         
+# Join LOD data 'LOD'
+LOD2 <- full_join(PCBs_LOD,DDTs_LOD)
+LOD3 <- full_join(LOD2,Chlordanes_LOD)
+LOD <- LOD3 %>%
+  filter(!grepl("Mirex|Heptachlor|PCB_37|opDDE|PCB_141|PCB_156|dHCH|PCB_128|PCB_183|PCB_170|PCB_167|PCB_194|PCB_189|PCB_157|PCB_123|PCB_206|PCB_122|PCB_114|PCB_209", Compound))
+
+# Join  Metadata 'Meta'
+Meta2 <- full_join(Metadata,Metadata2)
+Meta3 <-full_join(Meta2,Metadata3)
+Meta <- Meta3 %>%
+  arrange(Volume, Lab_ID, Fraction, Group)  %>% 
+  mutate(New_Volume= ifelse(grepl("3101|3102",Lab_ID), 100, Volume)) %>% # Corrects sample-volume errors made in the lab.
+  mutate(New_Volume= ifelse(grepl("3111",Lab_ID), 80.8, New_Volume)) %>%
+  mutate(New_Volume= ifelse(grepl("3073|3074",Lab_ID), 442, New_Volume)) %>%
+  mutate(New_Volume= ifelse(grepl("3114",Lab_ID), 64, New_Volume)) %>%
+  mutate(Station= ifelse(grepl("3103|3104",Lab_ID), "BLANK", Station)) %>%
+  mutate(Fraction= ifelse(grepl("3104|3086",Lab_ID), "Dissolved", Fraction)) %>%
+  mutate(Type= ifelse(grepl("3073|3074|3075|3076|3077|3078|3079|3080|3081|3085|3086|3089|3090|3091|3092",Lab_ID), "Fjord", Type)) %>%
+  mutate(Station= ifelse(grepl("3105",Lab_ID), "KH", Station)) %>%
+  mutate(Type= ifelse(grepl("3071|3072|3083|3084|3087|3088",Lab_ID), "Fjord", Type))
+
+Together2 <- full_join(Meta,Concentrations) 
+```
+
+
+# Step 2. Blank Correction
+
+Fieldblanks are subtracted from concentrations (only for > LOD values). 
+
+```{r LOD_Overview, results='asis'}
+# LOD overview
+LOD_All <- full_join(Meta,LOD) 
+Table1<- LOD_All %>% 
+  mutate(LOD=LOD*Volume/New_Volume) %>% 
+  filter(Station!= 'BLANK') %>% 
+  select(Station, Type, Fraction, Group, Compound, LOD) %>% 
+  mutate(Group= ifelse(grepl("aHCH|bHCH|gHCH",Compound), "HCH", Group)) %>% 
+  mutate(Group= ifelse(grepl("Pest",Group), "Chlordanes", Group)) %>%
+  mutate(Group= ifelse(grepl("HCB|PeCB",Compound), "Chlorobenzenes", Group)) %>%
+  drop_na(Compound) %>% 
+  group_by(Group, Compound) %>% 
+  summarize(n=n(), mean = mean(LOD, na.rm=T),stdev= sd(LOD, na.rm=T), min = min(LOD), max = max(LOD))
+
+Table1 %>% 
+  kable(caption= 'Overview of LOD Values', digits=2) %>% 
+  kable_classic(full_width = F, html_font = "Cambria")
+
+write_csv(Table1, "Clean_Output/LODs.csv")
+```
+
+
+
+```{r Cutoff}
+# Set LOD cutoff
+
+Cutoff <- Concentrations %>%
+  select(Lab_ID,Compound, Concentration) %>%
+   pivot_wider(names_from = "Compound", values_from = "Concentration") %>%
+   select(-Lab_ID) %>%
+   replace(is.na(.), 0) 
+
+#sorting out how many detects per congener
+par(mfrow=c(1,1))
+dotchart(sort(colSums(Cutoff > 0)/46*100), main="Number of detected  values", pch=20, cex=0.5)
+abline(v=45) #Putting the cutoff value to LOD over 45%. 
+```
+
+
+```{r Correction}
+
+Together <- Together2 %>%
+             filter(!grepl("Mirex|Heptachlor|PCB_37|opDDE|PCB_209|PCB_141|PCB_156|dHCH|PCB_128|PCB_183|PCB_170|DecaCB_209|PCB_167|PCB_194|PCB_189|PCB_157|PCB_123|PCB_206|PCB_122|PCB_114",Compound)) %>% # Compounds that were < LOD for > 45% of the samples are removed from analysis. 
+             mutate(Sample_ID = paste0(Lab_ID, Type, Fraction)) %>%
+             group_by(Sample_ID)  %>%
+             mutate(Concentration2 = (Concentration*Volume))
+             
+Fjord_Part <- Together %>%
+ select(Sample_ID, Type, Fraction, Compound, Concentration,Concentration2) %>%
+  filter(Type=='Fjord', Fraction=='Particulate') %>%
+  mutate(Concentration2 = replace(Concentration2, which(Concentration < 0), 0)) %>% #Filter through for values >0 before blank subtracting (both blanks and sample needs to be >LOD!)
+  select(Sample_ID, Compound, Concentration2) %>% 
+  pivot_wider(names_from = "Sample_ID", values_from= 'Concentration2') %>% 
+  mutate_at(vars(-c(Compound)), ~(.-`3071FjordParticulate`)) %>%
+  pivot_longer(cols=-c(Compound), names_to = "Sample_ID", values_to= 'Concentration_corr') 
+
+Fjord_Dis <- Together %>%
+ select(Sample_ID, Type, Fraction, Compound, Concentration,Concentration2) %>%
+  filter(Type=='Fjord', Fraction=='Dissolved') %>%
+  mutate(Concentration2 = replace(Concentration2, which(Concentration < 0), 0)) %>%
+  select(Sample_ID, Compound, Concentration2) %>% 
+  pivot_wider(names_from = "Sample_ID", values_from= 'Concentration2') %>%
+  mutate_at(vars(-c(Compound)), ~(.-`3072FjordDissolved`)) %>%
+  pivot_longer(cols=-c(Compound), names_to = "Sample_ID", values_to= 'Concentration_corr')
+
+River_Part <-Together %>%
+ select(Sample_ID, Type, Fraction, Compound, Concentration,Concentration2) %>%
+  filter(Type=='River', Fraction=='Particulate') %>%
+  mutate(Concentration2 = replace(Concentration2, which(Concentration < 0), 0)) %>%
+  select(Sample_ID, Compound, Concentration2) %>% 
+  pivot_wider(names_from = "Sample_ID", values_from= 'Concentration2') %>%
+  mutate_at(vars(-c(Compound)), ~(.-`3103RiverParticulate`)) %>%
+  pivot_longer(cols=-c(Compound), names_to = "Sample_ID", values_to= 'Concentration_corr')
+
+River_Dis <- Together %>%
+ select(Sample_ID, Type, Fraction, Compound, Concentration,Concentration2) %>%
+  filter(Type=='River', Fraction=='Dissolved') %>%
+  mutate(Concentration2 = replace(Concentration2, which(Concentration < 0), 0)) %>%
+  select(Sample_ID, Compound, Concentration2) %>% 
+  pivot_wider(names_from = "Sample_ID", values_from= 'Concentration2') %>%
+  mutate_at(vars(-c(Compound)), ~(.-`3104RiverDissolved`)) %>%
+  pivot_longer(cols=-c(Compound), names_to = "Sample_ID", values_to= 'Concentration_corr')
+
+Rivers <- full_join(River_Dis,River_Part)
+Fjord <- full_join(Fjord_Dis,Fjord_Part)
+Together_again2 <- full_join(Rivers,Fjord)
+Together_again3 <- full_join(Together_again2, Together)
+Together_again <- full_join(Together_again3, LOD)
+```
+
+
+# Step 3. Replace < LODs
+
+ < LOD values are replaced with randomly generated values between 0.5LOD and LOD.
+ 
+```{r Replace}
+
+# Replace <LOD values with randomly generated value between 0.5LOD and LOD. 
+
+Replace <- Together_again %>%
+   group_by(Lab_ID)  %>%
+   mutate(LOD=LOD*Volume/New_Volume) %>% 
+   mutate(Final_Concentration= Concentration_corr/New_Volume) %>%
+   mutate(Final_Concentration = replace(Final_Concentration, which(Concentration < 0), runif(1,min=(0.50*LOD), max=LOD)))  %>%
+   select(Sample_ID, Station, Type, Fraction, New_Volume, Compound, Final_Concentration) %>%
+   filter(!grepl("BLANK",Station)) %>%
+   pivot_wider(names_from = "Compound", values_from= 'Final_Concentration') %>% 
+   drop_na(Station) %>% 
+  replace(is.na(.), 0) %>%
+   mutate(Sum_PCB = PCB_18 + PCB_28 + PCB_31 + PCB_33 + PCB_47 + PCB_52 + PCB_66 + PCB_74 + PCB_99 + PCB_101 + PCB_105 + PCB_118 + PCB_138 + PCB_149 + PCB_153 + PCB_180 + PCB_187) %>%
+   mutate(Sum_PCB7=PCB_28+PCB_52+PCB_101+PCB_138+PCB_153+PCB_180) %>%
+   mutate(Sum_HCH= aHCH+bHCH+gHCH) %>%
+   mutate(Sum_DDTs = ppDDE+opDDD+ppDDD+opDDT+ppDDT) %>%
+   mutate(Sum_Chlordanes = trans_Chlordane+cis_Chlordane+trans_Nonachlor+cis_Nonachlor) %>%
+   mutate(Sum_Chlorobenzenes = HCB+PeCB) %>%
+   mutate(Sum_OC = Sum_Chlordanes+Sum_HCH+Sum_DDTs+Sum_PCB+PeCB+HCB) %>%
+   ungroup()
+
+Not_Replace <- Together_again %>%
+   group_by(Lab_ID)  %>%
+   mutate(LOD=LOD*Volume/New_Volume) %>% 
+   mutate(Final_Concentration= Concentration_corr/New_Volume) %>%
+   mutate(Final_Concentration = replace(Final_Concentration, which(Concentration < 0), 0))  %>%
+   select(Sample_ID, Station, Type, Fraction, New_Volume, Compound, Final_Concentration) %>%
+   filter(!grepl("BLANK",Station)) %>%
+   pivot_wider(names_from = "Compound", values_from= 'Final_Concentration') %>% 
+   drop_na(Station) %>% 
+   replace(is.na(.), 0) %>%
+   mutate(Sum_PCB = PCB_18 + PCB_28 + PCB_31 + PCB_33 + PCB_47 + PCB_52 + PCB_66 + PCB_74 + PCB_99 + PCB_101 + PCB_105 + PCB_118 + PCB_138 + PCB_149 + PCB_153 + PCB_180 + PCB_187) %>%
+   mutate(Sum_PCB7=PCB_28+PCB_52+PCB_101+PCB_138+PCB_153+PCB_180) %>%
+   mutate(Sum_HCH= aHCH+bHCH+gHCH) %>%
+   mutate(Sum_DDTs = ppDDE+opDDD+ppDDD+opDDT+ppDDT) %>%
+   mutate(Sum_Chlordanes = trans_Chlordane+cis_Chlordane+trans_Nonachlor+cis_Nonachlor) %>%
+   mutate(Sum_Chlorobenzenes = HCB+PeCB) %>%
+   mutate(Sum_OC = Sum_Chlordanes+Sum_HCH+Sum_DDTs+Sum_PCB+PeCB+HCB) %>%
+   ungroup()
+```
+
+
+# Print supplemental tables and generate cleaned datafile for manuscript figures. 
+
+## Table S1. List of compounds analyzed. 
+
+```{r Table S1}
+
+# Table of all compounds analyzed
+
+TableS2 <- Concentrations %>%
+  filter(Lab_ID == 3071) %>%
+  select(Group, Compound) %>%
+  mutate(Group= ifelse(grepl("aHCH|bHCH|gHCH|dHCH", Compound), "HCH", Group)) %>% 
+  mutate(Group= ifelse(grepl("Pest",Group), "Chlordanes", Group)) %>%
+  mutate(Group= ifelse(grepl("HCB|PeCB",Compound), "Chlorobenzenes", Group)) %>%
+  mutate(Excluded=ifelse(grepl("Mirex|Heptachlor|PCB_37|opDDE|PCB_141|PCB_156|dHCH|PCB_128|PCB_183|PCB_170|DecaCB_209|PCB_167|PCB_194|PCB_189|PCB_157|PCB_123|PCB_206|PCB_122|PCB_114|PCB_209",Compound), "<LOD", "")) %>%
+  arrange(Group,Compound,Excluded)
+
+TableS2  %>% 
+  kable(caption= 'List of Compounds Anlaysed. Compounds which were < LOD for > 45% of the samples were excluded from analysis, as indicated.', digits=4) %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>%
+  row_spec(0, bold = TRUE)
+```
+
+
+## Table S2. LODs
+
+```{r Table S2}
+
+# Overview of LODs for each contaminant group
+LOD_All <- full_join(Meta,LOD) 
+Table1<- LOD_All %>% 
+  mutate(LOD=LOD*Volume/New_Volume) %>% 
+  filter(Station!= 'BLANK') %>% 
+  select(Station, Type, Fraction, Group, Compound, LOD) %>% 
+  mutate(Group= ifelse(grepl("aHCH|bHCH|gHCH",Compound), "HCH", Group)) %>% 
+  mutate(Group= ifelse(grepl("Pest",Group), "Chlordanes", Group)) %>%
+  mutate(Group= ifelse(grepl("HCB|PeCB",Compound), "Chlorobenzenes", Group)) %>%
+  drop_na(Compound) %>% 
+  group_by(Group, Compound) %>% 
+  summarize(n=n(), mean = mean(LOD, na.rm=T),stdev= sd(LOD, na.rm=T),min = min(LOD), max = max(LOD))
+
+Table1 %>% 
+  kable(caption= 'Overview of LOD Values', digits=2) %>% 
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+## Table S3. Recovery
+
+```{r Table S3}
+
+# Recovery Tables
+
+Recovery2<- full_join(All2,Chlordanes)
+Recovery <- full_join(Recovery2, Meta) %>%
+  select(Group, Type, Station, Fraction, Compound, Recovery) %>%
+  filter(Station != 'BLANK') %>%
+  filter(!grepl("Mirex|Heptachlor|Sum|PCB_37|opDDE|PCB_141|PCB_156|dHCH|PCB_128|PCB_183|PCB_170|PCB_167|PCB_194|PCB_189|PCB_157|PCB_123|PCB_206|PCB_122|PCB_114|Deca",Compound)) %>%
+  mutate(Group= ifelse(grepl("aHCH|bHCH|gHCH",Compound), "HCH", Group)) %>% 
+  mutate(Group= ifelse(grepl("Pest",Group), "Chlordanes", Group)) %>%
+  mutate(Group= ifelse(grepl("HCB|PeCB",Compound), "Chlorobenzenes", Group))
+
+Table <- Recovery %>% 
+  group_by(Group) %>% 
+  summarize(n=n(), Mean = mean(Recovery, na.rm=T), stdev = sd(Recovery, na.rm=T), 
+            min = min(Recovery, na.rm=T), max = max(Recovery, na.rm=T))
+
+TableS3<- Recovery %>%
+  group_by(Group,Compound) %>% 
+  summarize(n=n(), Mean = mean(Recovery, na.rm=T), stdev = sd(Recovery, na.rm=T), 
+            min = min(Recovery, na.rm=T), max = max(Recovery, na.rm=T))
+
+TableS3  %>% 
+  kable(caption= 'Table. S3. Recovery', digits=4) %>% 
+  kable_classic(full_width = F, html_font = "Cambria")  %>%
+  row_spec(0, bold = TRUE)
+```
+
+
+## Table S5. Concentrations
+
+```{r Table S5}
+
+# Table of concentrations: mean +/- SD and ranges
+
+Table2 <- Replace %>% 
+  filter(New_Volume != 1) %>% 
+  select(Station, Type, Fraction, HCB, Sum_PCB, Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_OC) %>% 
+  pivot_longer(cols= -c(Station, Type, Fraction), names_to = "Compound", values_to= 'Concentration') %>% 
+  group_by(Type, Station, Fraction, Compound) %>% 
+  mutate(Station = factor(Station, levels= c("KV", "IF", "GA", "BA", "KH"))) %>%
+  arrange(Station) %>%
+  summarize(n=n(), Mean=mean(Concentration, na.rm=T), stdev= sd(Concentration, na.rm=T), 
+            min = min(Concentration), max = max(Concentration))  %>% 
+  pivot_longer(cols= -c(Station, Type, Fraction, Compound, n), names_to = "Stat", values_to= 'Stat2') %>% 
+  unite(Both, Compound, Stat, sep = "_", remove = TRUE, na.rm = FALSE)  %>% 
+  pivot_wider(names_from = "Both", values_from= 'Stat2') %>%
+  ungroup()  %>%
+  select(-c(Type))
+  
+Table2 %>% 
+  kable(caption= 'Concentrations of main contaminant groups by station', digits=2, 
+        booktabs = T, align = c("r"), 
+        col.names = c("Station","Fraction","n","mean","stdev","min","max","mean","stdev","min","max","mean","stdev","min","max","mean","stdev","min","max","mean","stdev","min","max","mean","stdev","min","max")) %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  add_header_above(c(" "=3, "HCB" = 4, "Sum Chlordanes" = 4, "Sum DDTs"=4, "Sum HCHs"=4, 
+                     "Sum OC"= 4, "Sum PCBs"=4)) %>% 
+  pack_rows("Fjord", 1, 6) %>%
+  pack_rows("River", 7, 16) %>%
+  row_spec(0, bold = TRUE)
+
+Table3 <- Replace %>% 
+  filter(New_Volume != 1) %>% 
+  select(Type, Fraction, HCB, Sum_PCB, Sum_HCH, Sum_DDTs, Sum_Chlordanes, Sum_OC) %>% 
+  pivot_longer(cols= -c(Type, Fraction), names_to = "Compound", values_to= 'Concentration') %>% 
+  group_by(Type, Fraction, Compound) %>% 
+  summarize(n=n(), Mean=mean(Concentration, na.rm=T), stdev= sd(Concentration, na.rm=T), 
+            min = min(Concentration), max = max(Concentration))  %>% 
+  pivot_longer(cols= -c(Type, Fraction, Compound, n), names_to = "Stat", values_to= 'Stat2') %>% 
+  unite(Both, Compound, Stat, sep = "_", remove = TRUE, na.rm = FALSE)  %>% 
+  pivot_wider(names_from = "Both", values_from= 'Stat2') %>%
+  ungroup()  %>%
+  select(-c(Type)) 
+
+Table3 %>% 
+  kable(caption= 'Concentrations of main contaminant groups by station type', digits=2, booktabs = T, align = c("r"), 
+        col.names = c("Fraction","n","mean","stdev","min","max","mean","stdev","min","max","mean","stdev","min","max","
+                      mean","stdev","min","max","mean","stdev","min","max","mean","stdev","min","max"))  %>% 
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  add_header_above(c(" "= 2, "HCB" = 4, "Sum Chlordanes" = 4, "Sum DDTs"=4, "Sum HCHs"=4, 
+                     "Sum OC"= 4, "Sum PCBs"=4)) %>% 
+  pack_rows("Fjord", 1, 2) %>%
+  pack_rows("River", 3, 4) %>%
+  row_spec(0, bold = TRUE)
+```
+
+## Produce cleaned datafile
+
+```{r Print Clean Datafile}
+
+# Produce cleaned datafile for use in manuscript code. 
+
+Clean_Data <- full_join(Replace, Fielddata, by = c("Station")) %>% 
+  relocate(Name, Station, Date, Longitude, Latitude, Type, Fraction, New_Volume, Lab_ID) %>% 
+  select(-c(Sample_ID, Station)) %>% 
+  rename("Volume_L" = "New_Volume", "Station" = "Name") 
+  
+# Save csv file with complete POPs dataset (with nondetects replaced with randomly generated values between 0.5LOD and LOD)
+  
+write_csv(Clean_Data, "Secondary_Data/KongsPOPs_Cleaned_Data.csv")
+```
+
+
+## Note: Name change
+
+```{r Notes}
+
+# Some of the station names used in the raw data have been undated in the manuscript. 
+
+# See below: new name = old name
+# Kongsvegen stream = Helt-Indre Breelv
+# Inner fjord = Inner Breelv
+# Gåsebu = Gåsebu
+# Bayelva = Bayela or Bay
+# Kvadehuken = Kvadehuken
+```
+
+
